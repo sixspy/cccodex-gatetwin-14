@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.db import 夹具目录, 连接
-from app.services import 装载, 贯验, 目录
+from app.services import 装载, 贯验, 目录, 封印
 
 路由 = APIRouter(prefix="/api")
 
@@ -11,6 +11,25 @@ from app.services import 装载, 贯验, 目录
 class 装载请求(BaseModel):
     批次编号: str = ""
     事件: list = Field(default_factory=list)
+
+
+class 封印请求(BaseModel):
+    行程键: str
+    备注: str = ""
+
+
+class 改出站请求(BaseModel):
+    行程键: str
+    出站站点键: str
+    出站事件时: str
+    依据: str = "人工修正"
+
+
+class 重放请求(BaseModel):
+    行程键: str
+    出站站点键: str
+    出站事件时: str
+    依据: str = "装载重放"
 
 
 @路由.get("/健康")
@@ -88,7 +107,24 @@ def 列开腿(状态: str = ""):
 def 列行程():
     conn = 连接()
     try:
-        return [dict(r) for r in conn.execute("SELECT * FROM 行程账 ORDER BY 处理时 DESC LIMIT 200")]
+        基行们 = conn.execute("SELECT * FROM 行程账 ORDER BY 处理时 DESC LIMIT 200").fetchall()
+        out = []
+        for 基行 in 基行们:
+            d = dict(基行)
+            主读 = 封印.取当前(conn, 基行["行程键"])
+            d["基行出站站点键"] = 基行["出站站点键"]
+            d["基行出站事件时"] = 基行["出站事件时"]
+            d["出站站点键"] = 主读["出站站点键"]
+            d["出站事件时"] = 主读["出站事件时"]
+            d["历时秒"] = 主读["历时秒"]
+            d["版本"] = 主读["版本"]
+            d["是否基行"] = 主读["是否基行"]
+            封 = conn.execute(
+                "SELECT 封印态 FROM 行程封印 WHERE 行程键=?", (基行["行程键"],)
+            ).fetchone()
+            d["封印态"] = 封["封印态"] if 封 else "未封印"
+            out.append(d)
+        return out
     finally:
         conn.close()
 
@@ -144,6 +180,39 @@ def 列贯验():
         return [dict(r) for r in conn.execute("SELECT * FROM 行程贯验 ORDER BY 编号 DESC LIMIT 20")]
     finally:
         conn.close()
+
+
+@路由.get("/行程封印")
+def 取封印(行程键: str = ""):
+    """只读：单行程封印态（行程键、封印态、主读出站站、拒绝/当前版本、valid）。"""
+    if not 行程键:
+        return 封印.全量状态()
+    return 封印.读状态(行程键)
+
+
+@路由.get("/行程封印/版本")
+def 取版本(行程键: str):
+    return 封印.列版本(行程键)
+
+
+@路由.get("/行程封印/审计")
+def 取审计(行程键: str):
+    return 封印.列审计(行程键)
+
+
+@路由.post("/行程封印")
+def 做封印(体: 封印请求):
+    return 封印.封印(体.行程键, 体.备注)
+
+
+@路由.post("/行程封印/改出站")
+def 做改出站(体: 改出站请求):
+    return 封印.改出站(体.行程键, 体.出站站点键, 体.出站事件时, 体.依据)
+
+
+@路由.post("/行程封印/重放")
+def 做重放(体: 重放请求):
+    return 封印.重放(体.行程键, 体.出站站点键, 体.出站事件时, 体.依据)
 
 
 @路由.get("/空桩")

@@ -20,6 +20,11 @@ def 总览() -> dict:
             "行程数": c("SELECT COUNT(*) FROM 行程账 WHERE 状态='已成对'"),
             "旁路匣": c("SELECT COUNT(*) FROM 旁路匣"),
             "装载批次": c("SELECT COUNT(*) FROM 装载批次"),
+            "已封印": c("SELECT COUNT(*) FROM 行程封印 WHERE 封印态='已封印'"),
+            "版本追加": c("SELECT COUNT(*) FROM 行程版本 WHERE 是否当前=1"),
+            "封印口径": (
+                conn.execute("SELECT 值 FROM 站规 WHERE 键='封印口径'").fetchone() or ["版本追加"]
+            )[0],
             "末次贯验": dict(末) if 末 else None,
         }
     finally:

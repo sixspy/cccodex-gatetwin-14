@@ -56,6 +56,37 @@ CREATE TABLE IF NOT EXISTS 行程账 (
   版本 INTEGER NOT NULL DEFAULT 1,
   处理时 TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS 行程版本 (
+  行程键 TEXT NOT NULL REFERENCES 行程账(行程键),
+  版本 INTEGER NOT NULL,
+  卡号 TEXT NOT NULL,
+  出站事件编号 TEXT NOT NULL,
+  出站站点键 TEXT NOT NULL,
+  出站事件时 TEXT NOT NULL,
+  历时秒 INTEGER NOT NULL DEFAULT 0,
+  依据 TEXT NOT NULL DEFAULT '',
+  是否当前 INTEGER NOT NULL DEFAULT 0,
+  处理时 TEXT NOT NULL,
+  PRIMARY KEY(行程键, 版本)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS 一年一行程一当前 ON 行程版本(行程键) WHERE 是否当前=1;
+CREATE TABLE IF NOT EXISTS 行程封印 (
+  行程键 TEXT PRIMARY KEY REFERENCES 行程账(行程键),
+  封印态 TEXT NOT NULL DEFAULT '已封印',
+  封印版本 INTEGER NOT NULL DEFAULT 1,
+  基行摘要 TEXT NOT NULL,
+  链摘要 TEXT NOT NULL,
+  封印时刻 TEXT NOT NULL,
+  更新处理时 TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS 封印审计 (
+  编号 INTEGER PRIMARY KEY AUTOINCREMENT,
+  行程键 TEXT NOT NULL,
+  动作 TEXT NOT NULL,
+  版本 INTEGER NOT NULL DEFAULT 0,
+  载荷 TEXT NOT NULL DEFAULT '{}',
+  时刻 TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS 旁路匣 (
   编号 INTEGER PRIMARY KEY AUTOINCREMENT,
   原因 TEXT NOT NULL,
@@ -76,6 +107,18 @@ CREATE TABLE IF NOT EXISTS 行程贯验 (
 );
 """
 
+默认站规 = {
+    "站名": "闸对",
+    "最大行程秒": "7200",
+    "同站进出": "允许",
+    "重复进站策略": "旧腿旁路并开新腿",
+    "配对策略": "同卡先进后出",
+    "骨架": "刷卡点装载→同卡进站出站成对物化→缺腿异向超时旁路→行程账与刷卡点互证",
+    "封印口径": "版本追加",
+    "封印后改出站": "追加版本行，禁止原地覆盖基行",
+    "装载重放口径": "封印行程只读：内容一致命中，内容冲突拒绝并落旁路",
+}
+
 
 def 此刻() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -83,17 +126,10 @@ def 此刻() -> str:
 
 def 初始化库() -> None:
     conn = 连接()
+    conn.execute("PRAGMA journal_mode = WAL")
     conn.executescript(建表)
-    if conn.execute("SELECT COUNT(*) AS c FROM 站规").fetchone()["c"] == 0:
-        for k, v in {
-            "站名": "闸对",
-            "最大行程秒": "7200",
-            "同站进出": "允许",
-            "重复进站策略": "旧腿旁路并开新腿",
-            "配对策略": "同卡先进后出",
-            "骨架": "刷卡点装载→同卡进站出站成对物化→缺腿异向超时旁路→行程账与刷卡点互证",
-        }.items():
-            conn.execute("INSERT INTO 站规(键, 值) VALUES (?, ?)", (k, v))
+    for k, v in 默认站规.items():
+        conn.execute("INSERT OR IGNORE INTO 站规(键, 值) VALUES (?, ?)", (k, v))
     if conn.execute("SELECT COUNT(*) AS c FROM 线路").fetchone()["c"] == 0:
         conn.execute("INSERT INTO 线路(线路键, 名称) VALUES (?, ?)", ("线1", "一号线"))
         for i, (k, n) in enumerate(
